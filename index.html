@@ -26,15 +26,11 @@
   <script>
     const { useState, useEffect, useRef } = React;
 
-    // Improved Maze Generator - ensures proper dimensions
     function generateMaze(gridSize) {
-      // We want gridSize cells that the player can move through
-      // The actual maze needs to be (gridSize * 2 + 1) to have walls between cells
       const mazeWidth = gridSize * 2 + 1;
       const mazeHeight = gridSize * 2 + 1;
       const maze = Array.from({ length: mazeHeight }, () => Array(mazeWidth).fill(1));
 
-      // Shuffle utility
       function shuffle(arr) {
         for (let i = arr.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -43,17 +39,16 @@
         return arr;
       }
 
-      // Carve passages using recursive backtracking
       function carve(x, y) {
         const cellRow = y * 2 + 1;
         const cellCol = x * 2 + 1;
         maze[cellRow][cellCol] = 0;
 
         const directions = shuffle([
-          { dx: 0, dy: -1 }, // up
-          { dx: 1, dy: 0 },  // right
-          { dx: 0, dy: 1 },  // down
-          { dx: -1, dy: 0 }  // left
+          { dx: 0, dy: -1 },
+          { dx: 1, dy: 0 },
+          { dx: 0, dy: 1 },
+          { dx: -1, dy: 0 }
         ]);
 
         for (const dir of directions) {
@@ -64,7 +59,6 @@
 
           if (newX >= 0 && newX < gridSize && newY >= 0 && newY < gridSize && 
               maze[newCellRow][newCellCol] === 1) {
-            // Carve wall between cells
             const wallRow = cellRow + dir.dy;
             const wallCol = cellCol + dir.dx;
             maze[wallRow][wallCol] = 0;
@@ -73,13 +67,10 @@
         }
       }
 
-      // Start carving from top-left
       carve(0, 0);
-
       return { maze, gridSize, mazeWidth, mazeHeight };
     }
 
-    // Icons
     const Trophy = ({ size = 20, color = "currentColor" }) => 
       React.createElement('svg', { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" },
         React.createElement('path', { d: "M6 9H4.5a2.5 2.5 0 0 1 0-5H6" }),
@@ -114,9 +105,10 @@
 
     function MazeCrawl() {
       const [level, setLevel] = useState(1);
-      const [gridSize, setGridSize] = useState(8); // Start with 8x8 grid of cells
+      const [startLevel, setStartLevel] = useState(1);
+      const [gridSize, setGridSize] = useState(8);
       const [mazeData, setMazeData] = useState(null);
-      const [playerPos, setPlayerPos] = useState({ x: 0, y: 0 }); // Grid coordinates
+      const [playerPos, setPlayerPos] = useState({ x: 1, y: 1 });
       const [moveQueue, setMoveQueue] = useState([]);
       const [recentCommands, setRecentCommands] = useState([]);
       const [connected, setConnected] = useState(false);
@@ -127,14 +119,12 @@
       const twitchClientRef = useRef(null);
       const gameLoopRef = useRef(null);
 
-      // Initialize maze
       useEffect(() => {
         const newMazeData = generateMaze(gridSize);
         setMazeData(newMazeData);
-        setPlayerPos({ x: 0, y: 0 }); // Start at top-left cell
+        setPlayerPos({ x: 1, y: 1 });
       }, [gridSize]);
 
-      // Connect to Twitch
       const connectToTwitch = async () => {
         if (!channel.trim()) {
           setStatus('Please enter a channel name');
@@ -144,16 +134,14 @@
         try {
           if (!window.tmi) {
             setStatus('Error: tmi.js not loaded yet. Try reloading the page.');
-            console.error('tmi.js not found on window:', Object.keys(window));
             return;
           }
-          const tmi = window.tmi;
 
           if (twitchClientRef.current) {
             await twitchClientRef.current.disconnect();
           }
 
-          const client = new tmi.Client({
+          const client = new window.tmi.Client({
             channels: [channel.toLowerCase()]
           });
 
@@ -164,16 +152,21 @@
           await client.connect();
           twitchClientRef.current = client;
           setConnected(true);
-          setStatus(`Connected to #${channel}`);
+          
+          const validLevel = Math.max(1, Math.min(100, parseInt(startLevel) || 1));
+          setLevel(validLevel);
+          setHighestLevel(validLevel);
+          setGridSize(8 + validLevel - 1);
+          
+          setStatus(`Connected to #${channel} - Starting at Level ${validLevel}`);
         } catch (error) {
           setStatus(`Connection failed: ${error.message}`);
-          console.error('Full error:', error);
         }
       };
 
       const handleTwitchMessage = (username, message) => {
         const cmd = message.trim().toLowerCase()[0];
-        const validMoves = { u: 'up', d: 'down', l: 'left', r: 'right' };
+        const validMoves = { w: 'up', a: 'left', s: 'down', d: 'right' };
         
         if (validMoves[cmd]) {
           setMoveQueue(prev => [...prev, cmd]);
@@ -184,14 +177,18 @@
         }
       };
 
-      // Game loop
       useEffect(() => {
         if (!connected || !mazeData) return;
 
+        const processingRef = { current: false };
+
         gameLoopRef.current = setInterval(() => {
+          if (processingRef.current) return;
+          
           setMoveQueue(prev => {
             if (prev.length === 0) return prev;
             
+            processingRef.current = true;
             const [nextMove, ...rest] = prev;
             
             setPlayerPos(currentPos => {
@@ -199,41 +196,32 @@
               let newY = currentPos.y;
               
               switch (nextMove) {
-                case 'u': newY = currentPos.y - 1; break;
-                case 'd': newY = currentPos.y + 1; break;
-                case 'l': newX = currentPos.x - 1; break;
-                case 'r': newX = currentPos.x + 1; break;
+                case 'w': newY = currentPos.y - 1; break;
+                case 's': newY = currentPos.y + 1; break;
+                case 'a': newX = currentPos.x - 1; break;
+                case 'd': newX = currentPos.x + 1; break;
               }
               
-              // Check bounds
-              if (newX < 0 || newX >= gridSize || newY < 0 || newY >= gridSize) {
+              if (newX < 1 || newX >= mazeData.mazeWidth - 1 || newY < 1 || newY >= mazeData.mazeHeight - 1) {
+                processingRef.current = false;
                 return currentPos;
               }
               
-              // Convert grid coordinates to maze coordinates
-              const currentMazeY = currentPos.y * 2 + 1;
-              const currentMazeX = currentPos.x * 2 + 1;
-              const newMazeY = newY * 2 + 1;
-              const newMazeX = newX * 2 + 1;
-              
-              // Check if there's a wall between current and new position
-              const wallY = currentMazeY + (newMazeY - currentMazeY) / 2;
-              const wallX = currentMazeX + (newMazeX - currentMazeX) / 2;
-              
-              if (mazeData.maze[wallY][wallX] === 0) {
-                // Check if reached the exit
-                if (newX === gridSize - 1 && newY === gridSize - 1) {
+              if (mazeData.maze[newY][newX] === 0) {
+                if (newX === mazeData.mazeWidth - 2 && newY === mazeData.mazeHeight - 2) {
                   setTimeout(() => {
                     const newLevel = level + 1;
                     setLevel(newLevel);
                     setHighestLevel(prev => Math.max(prev, newLevel));
-                    setGridSize(8 + newLevel); // Increase by 1 each level
+                    setGridSize(8 + newLevel - 1);
                     setMoveQueue([]);
                   }, 100);
                 }
+                processingRef.current = false;
                 return { x: newX, y: newY };
               }
               
+              processingRef.current = false;
               return currentPos;
             });
             
@@ -288,21 +276,41 @@
             boxShadow: `0 0 20px ${getNeonColor()}33`
           }
         },
-          React.createElement('input', {
-            type: 'text',
-            value: channel,
-            onChange: (e) => setChannel(e.target.value),
-            placeholder: 'Twitch channel name',
-            style: {
-              background: '#0a0a1a',
-              border: '1px solid #333',
-              color: '#fff',
-              padding: '10px',
-              borderRadius: '5px',
-              marginRight: '10px',
-              fontSize: '1rem'
-            }
-          }),
+          React.createElement('div', { style: { marginBottom: '15px' } },
+            React.createElement('input', {
+              type: 'text',
+              value: channel,
+              onChange: (e) => setChannel(e.target.value),
+              placeholder: 'Twitch channel name',
+              style: {
+                background: '#0a0a1a',
+                border: '1px solid #333',
+                color: '#fff',
+                padding: '10px',
+                borderRadius: '5px',
+                marginRight: '10px',
+                fontSize: '1rem',
+                width: '200px'
+              }
+            }),
+            React.createElement('input', {
+              type: 'number',
+              value: startLevel,
+              onChange: (e) => setStartLevel(Math.max(1, Math.min(100, parseInt(e.target.value) || 1))),
+              placeholder: 'Start Level',
+              min: '1',
+              max: '100',
+              style: {
+                background: '#0a0a1a',
+                border: '1px solid #333',
+                color: '#fff',
+                padding: '10px',
+                borderRadius: '5px',
+                fontSize: '1rem',
+                width: '100px'
+              }
+            })
+          ),
           React.createElement('button', {
             onClick: connectToTwitch,
             style: {
@@ -405,12 +413,9 @@
           },
             mazeData.maze.map((row, mazeY) =>
               row.map((cell, mazeX) => {
-                // Convert maze coordinates back to grid coordinates
-                const gridX = (mazeX - 1) / 2;
-                const gridY = (mazeY - 1) / 2;
-                const isPlayerCell = mazeX === playerPos.x * 2 + 1 && mazeY === playerPos.y * 2 + 1;
-                const isExit = gridX === gridSize - 1 && gridY === gridSize - 1 && cell === 0;
-                const isStart = gridX === 0 && gridY === 0 && cell === 0;
+                const isPlayerCell = mazeX === playerPos.x && mazeY === playerPos.y;
+                const isExit = mazeX === mazeData.mazeWidth - 2 && mazeY === mazeData.mazeHeight - 2;
+                const isStart = mazeX === 1 && mazeY === 1;
                 
                 return React.createElement('div', {
                   key: `${mazeX}-${mazeY}`,
@@ -476,32 +481,11 @@
               }
             },
               React.createElement('div', { style: { marginBottom: '5px', color: getNeonColor() } }, 'Chat Commands:'),
-              React.createElement('div', null, '• ', React.createElement('strong', null, 'u'), ' = Up'),
-              React.createElement('div', null, '• ', React.createElement('strong', null, 'd'), ' = Down'),
-              React.createElement('div', null, '• ', React.createElement('strong', null, 'l'), ' = Left'),
-              React.createElement('div', null, '• ', React.createElement('strong', null, 'r'), ' = Right')
-            
-            ),
-              React.createElement('div', {
-              style: { display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '20%' }
-            }, 
-              React.createElement('svg', {
-                xmlns: "http://www.w3.org/2000/svg",
-                width: 300,
-                height: 300,
-                viewBox: "0 0 900 900"
-              },
-                React.createElement('path', {
-                  d: "M 437 51.529 C 424.392 53.690, 416.825 56.744, 404 64.847 C 396.077 69.853, 69.583 396.413, 64.473 404.443 C 54.947 419.413, 51 432.760, 51 450 C 51 467.256, 54.966 480.652, 64.488 495.557 C 69.874 503.988, 396.118 830.177, 404.500 835.512 C 422.002 846.651, 441.892 851.574, 459.193 849.050 C 473.486 846.965, 483.185 843.318, 495.783 835.290 C 503.627 830.292, 567.087 766.738, 573.731 757.227 C 584.802 741.380, 591.018 724.016, 593.560 701.835 C 594.292 695.450, 591.686 674.911, 589.332 668.500 C 588.523 666.300, 587.445 662.832, 586.936 660.794 C 585.541 655.212, 583.142 650.377, 577.116 641 C 566.536 624.538, 559.380 616.178, 528.350 584.029 C 523.234 578.729, 523.791 577.646, 531.250 578.392 C 538.184 579.085, 552.815 577.127, 559.963 574.549 C 564.177 573.028, 564.567 573.043, 566.963 574.813 C 572.665 579.025, 591.973 587.107, 604.500 590.526 C 607.250 591.277, 611.975 592.616, 615 593.502 C 618.025 594.389, 622.569 594.936, 625.098 594.718 C 631.994 594.125, 634.904 591.408, 641.723 579.193 C 643.132 576.670, 645.645 572.331, 647.307 569.553 C 650.549 564.130, 656.016 553.994, 659.200 547.500 C 660.278 545.300, 661.654 542.600, 662.256 541.500 C 662.859 540.400, 665.973 534.386, 669.176 528.136 C 674.302 518.134, 675 516.077, 675 510.963 C 675 503.115, 672.406 500.153, 660.604 494.518 C 650.441 489.666, 633.859 478.848, 627.006 472.598 C 614.451 461.150, 591.330 437.885, 579.702 425 C 572.505 417.025, 565.128 408.963, 563.308 407.083 C 558.990 402.624, 559.095 399.780, 563.797 393.869 C 564.510 392.973, 565.887 390.723, 566.856 388.869 C 567.824 387.016, 571.966 379.771, 576.059 372.768 C 583.222 360.512, 584.991 357.441, 590.140 348.320 C 591.438 346.021, 598.290 334.321, 605.366 322.320 C 618.428 300.167, 620.122 295.970, 618.110 290.750 C 617.121 288.185, 616.657 288, 611.209 288 L 605.368 288 591.434 298.465 C 583.770 304.221, 576.023 309.958, 574.218 311.215 C 572.413 312.472, 568.138 315.621, 564.718 318.214 C 537.865 338.573, 520.740 351, 519.536 351 C 518.161 351, 510.506 341.884, 500.882 328.785 C 487.924 311.150, 479.262 299.244, 477.756 297 C 476.833 295.625, 473.812 291.350, 471.043 287.500 C 468.273 283.650, 463.004 276.092, 459.335 270.705 C 455.665 265.317, 452.329 260.703, 451.921 260.451 C 451.513 260.199, 445.662 262.470, 438.918 265.496 C 432.174 268.523, 426.228 271, 425.705 271 C 424.687 271, 392.719 286.914, 382.157 292.678 C 378.669 294.582, 372.903 298.134, 369.344 300.570 C 365.785 303.007, 362.297 305, 361.592 305 C 360.887 305, 359.495 305.900, 358.500 307 C 357.505 308.100, 356.307 309, 355.839 309 C 354.568 309, 336.728 321.941, 324.897 331.445 C 306.909 345.895, 281.449 374.078, 271.637 390.401 C 270.612 392.105, 269.395 393.739, 268.932 394.031 C 268.469 394.323, 265.333 400.173, 261.964 407.031 C 253.254 424.758, 253.319 424.604, 248.038 440 C 246.119 445.592, 242.055 462.293, 242.026 464.701 C 242.012 465.912, 241.325 469.494, 240.500 472.661 C 238.831 479.069, 238.470 519.826, 239.991 530 C 243.130 550.985, 244.552 555.497, 249.445 560 C 251.796 562.164, 253.091 562.500, 259.084 562.500 L 266.008 562.500 270.086 558 L 274.165 553.500 273.633 545.279 C 273.341 540.758, 272.531 536.033, 271.835 534.779 C 270.904 533.105, 270.559 525.468, 270.534 506 C 270.498 478.155, 270.898 474.642, 276.099 457.082 C 277.145 453.551, 278 450.185, 278 449.601 C 278 443.406, 300.399 402.273, 309.094 392.500 C 310.562 390.850, 314.904 385.886, 318.743 381.470 C 331.224 367.111, 360.207 342.749, 377.002 332.500 C 381.509 329.750, 386.840 326.409, 388.848 325.076 C 398.252 318.833, 436.180 300, 439.349 300 C 441.659 300, 443.641 302.337, 452.490 315.500 C 454.709 318.800, 458.230 323.750, 460.316 326.500 C 479.447 351.725, 480.521 353.370, 478.729 354.707 C 477.268 355.797, 469.297 357.782, 463 358.624 C 460.525 358.955, 457.825 359.572, 457 359.997 C 456.175 360.421, 453.475 361.081, 451 361.463 C 446.207 362.203, 437.894 364.653, 426.500 368.682 C 422.650 370.043, 418.150 371.520, 416.500 371.964 C 412.265 373.103, 394.335 380.484, 392.788 381.725 C 392.079 382.293, 389.475 383.764, 387 384.993 C 358.772 399.013, 335.548 418.761, 315.207 446.041 C 304.141 460.881, 291.221 490.083, 288.099 507.308 C 287.520 510.502, 286.814 513.491, 286.531 513.950 C 284.882 516.619, 282.688 540.640, 282.600 557 C 282.462 582.456, 285.339 606.815, 291.574 633 C 294.966 647.242, 296.099 651.686, 296.932 654 C 297.426 655.375, 299.082 660.775, 300.611 666 C 303.330 675.294, 306.235 681.290, 309.216 683.765 C 311.831 685.934, 322.194 686.468, 325.773 684.617 C 329.660 682.607, 334 675.445, 334 671.040 C 334 669.234, 332.415 662.748, 330.477 656.628 C 324.246 636.944, 321.251 625.770, 319.989 617.500 C 319.570 614.750, 318.757 610.700, 318.183 608.500 C 317.610 606.300, 316.153 596.400, 314.945 586.500 C 310.414 549.351, 314.840 515.363, 327.985 486.373 C 338.515 463.150, 359.480 439.407, 383.552 423.444 C 394.719 416.039, 398.069 414.204, 413.500 407.042 C 432.197 398.364, 461.907 389.811, 486.835 385.930 C 492.632 385.027, 495.426 385.067, 500.161 386.117 C 507.147 387.667, 507.263 387.782, 524.465 410.320 C 550.552 444.498, 584.819 479.980, 610.652 499.562 C 622.474 508.523, 630.761 514.196, 634.231 515.702 C 638.953 517.751, 637.825 522.324, 628.607 538.500 C 627.353 540.700, 624.189 546.467, 621.576 551.315 C 618.963 556.163, 616.271 560.342, 615.596 560.602 C 614.163 561.151, 599.186 556.044, 590.500 552.044 C 587.200 550.524, 582.517 547.619, 580.093 545.588 C 571.472 538.365, 566.167 537.472, 557.891 541.854 C 552.335 544.795, 540.141 548.010, 534.627 547.987 C 525.466 547.949, 511.804 540.591, 505.042 532.053 C 500.027 525.721, 492 507.604, 492 502.617 C 492 498.875, 488.077 489.567, 485.745 487.779 C 479.694 483.138, 469.296 483.919, 464.280 489.391 L 461 492.971 461 506.235 C 461 513.900, 461.640 522.878, 462.516 527.500 C 464.301 536.926, 468.600 552.007, 470.587 555.816 C 471.357 557.292, 471.990 559.066, 471.994 559.759 C 471.997 560.451, 473.350 562.881, 475 565.159 C 476.650 567.436, 478 569.702, 478 570.194 C 478 571.703, 490.179 589, 494.500 593.629 C 495.600 594.807, 500.550 600.163, 505.500 605.530 C 510.450 610.898, 518.550 619.253, 523.500 624.097 C 528.450 628.941, 534.075 634.970, 536 637.495 C 537.925 640.020, 541.566 644.654, 544.091 647.793 C 550.653 655.949, 557.633 669.729, 559.981 679.162 C 564.750 698.324, 561.221 719.828, 550.736 735.500 C 545.399 743.477, 479.751 809.489, 474.500 812.158 C 467.684 815.623, 455.753 818.969, 450.155 818.985 C 443.707 819.003, 432.336 815.724, 425.500 811.875 C 421.956 809.880, 372.348 760.899, 255.115 643.645 C 124.573 513.079, 89.233 477.205, 87.370 473.365 C 79.468 457.074, 79.458 444.231, 87.332 427 C 89.536 422.177, 110.323 401.046, 256.172 255.372 C 350.662 160.997, 424.012 88.499, 426 87.517 C 432.643 84.240, 444.516 81.030, 450 81.030 C 455.484 81.030, 467.357 84.240, 474 87.517 C 475.989 88.499, 549.304 160.972, 643.806 255.372 C 819.697 431.076, 812.563 423.588, 816.483 436.606 C 819.063 445.175, 819.358 451.935, 817.484 459.523 C 813.841 474.274, 813.539 474.661, 776.926 511.507 C 758.313 530.240, 742.634 546.832, 742.020 548.449 C 741.352 550.204, 741.172 553.526, 741.570 556.715 C 742.146 561.322, 742.781 562.513, 746.250 565.482 C 751.021 569.566, 757.316 570.921, 762.264 568.928 C 766.864 567.075, 830.602 503.169, 835.499 495.500 C 845.128 480.420, 849.012 467.255, 848.983 449.792 C 848.954 432.960, 846.080 422.405, 837.601 408 C 832.916 400.039, 822.064 388.966, 666.549 233.451 C 488.221 55.123, 496.924 63.371, 479.346 56.026 C 471.856 52.896, 456.735 49.930, 449.250 50.122 C 446.637 50.189, 441.125 50.822, 437 51.529",
-                  stroke: "none",
-                  fill: "#f6f6f6",
-                  fillRule: "evenodd"
-                })
-              ),
-              ''
+              React.createElement('div', null, '• ', React.createElement('strong', null, 'w'), ' = Up'),
+              React.createElement('div', null, '• ', React.createElement('strong', null, 'a'), ' = Left'),
+              React.createElement('div', null, '• ', React.createElement('strong', null, 's'), ' = Down'),
+              React.createElement('div', null, '• ', React.createElement('strong', null, 'd'), ' = Right')
             )
-
-
           )
         ),
 
@@ -519,7 +503,8 @@
           React.createElement('h3', { style: { color: getNeonColor(), marginTop: 0 } }, 'How to Play:'),
           React.createElement('ul', { style: { paddingLeft: '20px' } },
             React.createElement('li', null, 'Connect to your Twitch channel'),
-            React.createElement('li', null, 'Chat sends commands: ', React.createElement('strong', null, 'u'), ', ', React.createElement('strong', null, 'd'), ', ', React.createElement('strong', null, 'l'), ', ', React.createElement('strong', null, 'r')),
+            React.createElement('li', null, 'Optional: Set a starting level (1-100)'),
+            React.createElement('li', null, 'Chat sends commands: ', React.createElement('strong', null, 'w'), ', ', React.createElement('strong', null, 'a'), ', ', React.createElement('strong', null, 's'), ', ', React.createElement('strong', null, 'd')),
             React.createElement('li', null, 'Navigate from the ', React.createElement('span', { style: { color: '#00ff88' } }, 'green start'), ' to the ', React.createElement('span', { style: { color: '#ff0088' } }, 'pink exit')),
             React.createElement('li', null, 'Each level increases maze complexity'),
             React.createElement('li', null, 'All commands are queued and executed in order')
